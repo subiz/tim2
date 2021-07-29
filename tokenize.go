@@ -1,4 +1,4 @@
-package tim
+package tim2
 
 import (
 	"regexp"
@@ -11,7 +11,7 @@ type MatchLiteral struct {
 }
 
 func splitSentence(r rune) bool {
-	return r == ':' || r == '.' || r == ';' || r == '\n'
+	return r == ':' || r == ';' || r == '\n' || r == ','
 }
 
 func Tokenize(str string) []string {
@@ -36,6 +36,11 @@ func Tokenize(str string) []string {
 			tokenM[t] = true
 		}
 
+		tokens = tokenizeFilename(str)
+		for _, t := range tokens {
+			tokenM[t] = true
+		}
+
 		tokens = tokenizeLiteral(str)
 		for _, t := range tokens {
 			tokenM[t] = true
@@ -47,7 +52,6 @@ func Tokenize(str string) []string {
 		tokens = append(tokens, k)
 	}
 	return tokens
-
 }
 
 const Email_regex = `([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)`
@@ -173,48 +177,59 @@ func tokenizeLiteral(str string) []string {
 	return strarr
 }
 
-func tokenizeLiteralVietnamese(str string) []string {
-	literals := make([]*MatchLiteral, 0)
-	biliterals := make([]*MatchLiteral, 0)
+func splitSpace(r rune) bool {
+	return r == ' ' || r == '\t' || r == '.'
+}
 
-	str += " "
-	rarr := []rune(str)
-	from, to := 0, 0
-	var prevliteral string
-	for i, r := range rarr {
-		if _, has := Norm_map[r]; has {
-			to++
+func tokenizeFilename(str string) []string {
+	strs := strings.FieldsFunc(str, func(r rune) bool {
+		return r == ' ' || r == '\t'
+	})
+	out := []string{}
+	for _, str := range strs {
+		if !strings.Contains(str, ".") {
 			continue
 		}
 
-		normtoken := make([]rune, to-from)
-		for j, tr := range rarr[from:to] {
-			normtoken[j] = tr
+		if len(str) > 51 {
+			str = str[:50]
 		}
-		literal := string(normtoken)
-		// TODO trim format rune
-		if len(literal) > 0 && !Stopword_map[literal] {
-			literals = append(literals, &MatchLiteral{Str: literal})
-		}
-		if len(prevliteral) > 0 && len(literal) > 0 && !Stopword_map[literal] {
-			biliterals = append(biliterals, &MatchLiteral{Str: string(prevliteral) + " " + literal})
-		}
-
-		prevliteral = literal
-		from, to = i+1, i+1
+		out = append(out, str)
 	}
 
-	strarr := make([]string, len(literals)+len(biliterals))
-	strindex := 0
-	for _, literal := range literals {
-		strarr[strindex] = literal.Str
-		strindex++
+	return out
+}
+
+func tokenizeLiteralVietnamese(str string) []string {
+	strs := strings.FieldsFunc(str, splitSpace)
+	out := []string{}
+	withoutemptystrs := []string{}
+	for _, str := range strs {
+		if len(str) > 0 {
+			withoutemptystrs = append(withoutemptystrs, str)
+		}
 	}
-	for _, literal := range biliterals {
-		strarr[strindex] = literal.Str
-		strindex++
+
+	for i, str := range withoutemptystrs {
+		if len(str) > 2 {
+			if len(str) > 45 {
+				out = append(out, str[:44])
+			} else {
+				out = append(out, str)
+			}
+		}
+
+		if i == len(withoutemptystrs)-1 {
+			continue
+		}
+
+		if len(str) > 45 || len(withoutemptystrs[i+1]) > 45 {
+			continue
+		}
+		// add biwords
+		out = append(out, str+" "+withoutemptystrs[i+1])
 	}
-	return strarr
+	return out
 }
 
 func isLiteral(token string) bool {
@@ -267,7 +282,7 @@ const RegexPhone = `([0-9._-]{3,})`
 var Regexp_phone = regexp.MustCompile(RegexPhone)
 
 // see http://www.clc.hcmus.edu.vn/?page_id=1507
-const Stopword_vi = "va, cua, co, cac, la"
+const Stopword_vi = "va, cua, co, cac, la, and, or"
 const Stopword_heuristic = "gmail, com, subiz"
 
 var Stopword_map map[string]bool

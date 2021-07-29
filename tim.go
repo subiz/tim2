@@ -2,7 +2,7 @@
 // it is a simple library so just call it "tim"
 // this is an upgraded version of tim2: can find specific part of the documentation
 
-package tim
+package tim2
 
 import (
 	"github.com/gocql/gocql"
