@@ -72,7 +72,7 @@ func Search(collection, accid, query, anchor string, limit int, ownerCheck func(
 	waitforstartup(collection, accid)
 	interms := Tokenize(query)
 	if len(interms) == 0 {
-		return []string{}, nil, "zzzzz", nil
+		return []string{}, []string{}, anchor, nil
 	}
 
 	// long query
@@ -96,7 +96,6 @@ func Search(collection, accid, query, anchor string, limit int, ownerCheck func(
 	} else {
 		terms = interms
 	}
-
 	// order by length desc
 	sort.Slice(terms, func(i, j int) bool { return len(terms[i]) > len(terms[j]) })
 
@@ -117,9 +116,10 @@ func Search(collection, accid, query, anchor string, limit int, ownerCheck func(
 				continue
 			}
 
-			if isMatchOtherTerms(collection, accid, docid, part, terms) {
+			if !isMatchOtherTerms(collection, accid, docid, part, terms) {
 				continue
 			}
+
 			hitDocs, hitParts = append(hitDocs, docid), append(hitParts, part)
 			if len(hitDocs) >= limit {
 				break
@@ -139,17 +139,17 @@ func Search(collection, accid, query, anchor string, limit int, ownerCheck func(
 		}
 
 		// the doc must match all other terms
-		if isMatchOtherTerms(collection, accid, docid, part, terms) {
+		if !isMatchOtherTerms(collection, accid, docid, part, terms) {
 			continue
 		}
+
 		hitDocs, hitParts = append(hitDocs, docid), append(hitParts, part)
 		if len(hitDocs) >= limit {
 			break
 		}
-
-		if err := iter.Close(); err != nil {
-			return nil, nil, "", err
-		}
+	}
+	if err := iter.Close(); err != nil {
+		return nil, nil, "", err
 	}
 
 	if len(hitDocs) == 0 {

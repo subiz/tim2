@@ -9,7 +9,7 @@ import (
 func TestLongQuery(t *testing.T) {
 	// interms := Tokenize("cong hoa xahoi chu hi")
 	// interms := Tokenize("cộng hòa xã    \thội\t chủ nghĩa Việt Nam.độc \nlập")
-	 interms := Tokenize("vào file xyz.txt là đc<script>console.log('1')</script> lasjdfl;k asjlkfdj alksjfdlkasj dkldsjalkfjlaksdjflkasjdlkfjaslkfjlkalskdjflkajsflkjasdfasdjf asldkfj")
+	interms := Tokenize("vào file xyz.txt là đc<script>console.log('1')</script> lasjdfl;k asjlkfdj alksjfdlkasj dkldsjalkfjlaksdjflkasjdlkfjaslkfjlkalskdjflkajsflkjasdfasdjf asldkfj")
 	fmt.Printf("%#v\n", interms)
 	var terms []string
 	if len(interms) > 5 {
