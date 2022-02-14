@@ -1,7 +1,6 @@
 package tim2
 
 import (
-	_ "fmt"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -9,10 +8,8 @@ import (
 	"github.com/thanhpk/ascii"
 )
 
-type MatchLiteral struct {
-	Str  string
-	Psrc []int
-}
+const Token_min_len = 2
+const Token_max_len = 45
 
 var replacer = strings.NewReplacer("/", " ", "\"", " ", "/", " ", "_", " ", "'", " ", "{", " ", "}", " ",
 	"(", " ", ")", " ", "[", " ", "]", " ", "&", " ", "?", " ", "!", " ", "=", " ", ">", " ", "<", " ")
@@ -100,7 +97,6 @@ func Tokenize(str string) []string {
 }
 
 const Email_regex = `([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)`
-
 var Email_regexp = regexp.MustCompile(Email_regex)
 
 // +84 2473.021.368
@@ -108,7 +104,6 @@ const PersonalPhoneNumber_digit = "0123456789"
 const PersonalPhoneNumber_format = "+() .-"
 const PersonalPhoneNumber_min_len = 7
 
-var PersonalPhoneNumber_regexp = regexp.MustCompile(RegexPhone)
 var PersonalPhoneNumber_norm_map map[rune]rune
 
 func findPersonalPhoneNumber(str string) []string {
@@ -167,15 +162,6 @@ func tokenizeFilename(str string) []string {
 	return out
 }
 
-const Token_min_len = 2
-const Token_max_len = 45
-
-var Norm_map map[rune]rune
-
-const RegexPhone = `([0-9._-]{3,})`
-
-var Regexp_phone = regexp.MustCompile(RegexPhone)
-
 // see http://www.clc.hcmus.edu.vn/?page_id=1507
 var stopWordM = map[string]bool{}
 
@@ -197,5 +183,4 @@ func init() {
 			stopWordM[stopword] = true
 		}
 	}
-
 }

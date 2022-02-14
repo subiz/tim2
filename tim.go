@@ -122,11 +122,7 @@ func doSearch(collection, accid, query string, limit int, validate func(doc, par
 			continue
 		}
 
-		if !validate(docid, part) {
-			continue
-		}
-
-		// the doc must match all other terms
+		// the doc must match all other terms (max 5)
 		matchAll := true
 		for i := 1; i < len(terms) && i < 5; i++ {
 			term := terms[i]
@@ -139,6 +135,10 @@ func doSearch(collection, accid, query string, limit int, validate func(doc, par
 		}
 
 		if !matchAll {
+			continue
+		}
+
+		if !validate(docid, part) {
 			continue
 		}
 
