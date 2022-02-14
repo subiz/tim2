@@ -3,6 +3,7 @@ package tim2
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 type MatchLiteral struct {
@@ -10,12 +11,18 @@ type MatchLiteral struct {
 	Psrc []int
 }
 
+var replacer = strings.NewReplacer("/", " ", "\"", " ", "/", " ", "_", " ", "'", " ", "{", " ", "}", " ",
+	"(", " ", ")", " ", "[", " ", "]", " ", "&", " ", "?", " ", "!", " ", "=", " ", ">", " ", "<", " ")
+
 func splitSentence(r rune) bool {
 	return r == ':' || r == ';' || r == '\n' || r == ','
 }
 
 func Tokenize(str string) []string {
+	str = replacer.Replace(str)
+	str = strings.ToLower(str)
 	strs := strings.FieldsFunc(str, splitSentence)
+
 	tokenM := make(map[string]bool)
 
 	// phones and emails
@@ -30,7 +37,6 @@ func Tokenize(str string) []string {
 	}
 
 	for _, str := range strs {
-		str = strings.ToLower(str)
 		tokens = tokenizeLiteralVietnamese(str)
 		for _, t := range tokens {
 			tokenM[t] = true
@@ -38,11 +44,13 @@ func Tokenize(str string) []string {
 
 		tokens = tokenizeFilename(str)
 		for _, t := range tokens {
+			//fmt.Println("TT22", t)
 			tokenM[t] = true
 		}
 
 		tokens = tokenizeLiteral(str)
 		for _, t := range tokens {
+			// fmt.Println("TT3", t)
 			tokenM[t] = true
 		}
 	}
@@ -62,35 +70,6 @@ const Email_min_len = 5
 
 var Email_regexp = regexp.MustCompile(Email_regex)
 var Email_norm_map map[rune]rune
-
-func findEmail(str string) []string {
-	if len(str) < Email_min_len {
-		return nil
-	}
-	str += " "
-	emails := make([]string, 0)
-	rarr := []rune(str)
-	from, to := 0, 0
-	for i, r := range rarr {
-		if _, has := Email_norm_map[r]; has {
-			to++
-			continue
-		}
-
-		token := string(rarr[from:to])
-		if len(token) >= Email_min_len && Email_regexp.MatchString(token) {
-			normtoken := make([]rune, len(token))
-			for j, tr := range token {
-				normtoken[j] = Email_norm_map[tr]
-			}
-			// TODO trim format rune
-			emails = append(emails, string(normtoken))
-		}
-
-		from, to = i+1, i+1
-	}
-	return emails
-}
 
 // +84 2473.021.368
 const PersonalPhoneNumber_digit = "0123456789"
@@ -156,7 +135,8 @@ func tokenizeLiteral(str string) []string {
 		if len(literal) > 0 && !Stopword_map[literal] && isLiteral(literal) {
 			literals = append(literals, &MatchLiteral{Str: literal})
 		}
-		if len(prevliteral) > 0 && len(literal) > 0 && !Stopword_map[literal] && isLiteral(prevliteral) {
+		if len(prevliteral) > 0 && len(literal) > 0 && !Stopword_map[literal] && isLiteral(prevliteral) &&
+			len(prevliteral) < 9 && len(literal) < 9 /* we dont want be-word to long */ {
 			biliterals = append(biliterals, &MatchLiteral{Str: string(prevliteral) + " " + literal})
 		}
 
@@ -191,9 +171,14 @@ func tokenizeFilename(str string) []string {
 			continue
 		}
 
+		if strings.HasSuffix(str, ".") {
+			continue
+		}
+
 		if len(str) > 51 {
 			str = str[:50]
 		}
+
 		out = append(out, str)
 	}
 
@@ -205,6 +190,10 @@ func tokenizeLiteralVietnamese(str string) []string {
 	out := []string{}
 	withoutemptystrs := []string{}
 	for _, str := range strs {
+		if len(str) < 2 || utf8.RuneCountInString(str) < 2 {
+			continue
+		}
+
 		if len(str) > 0 {
 			withoutemptystrs = append(withoutemptystrs, str)
 		}
@@ -226,8 +215,11 @@ func tokenizeLiteralVietnamese(str string) []string {
 		if len(str) > 45 || len(withoutemptystrs[i+1]) > 45 {
 			continue
 		}
-		// add biwords
-		out = append(out, str+" "+withoutemptystrs[i+1])
+
+		if len(str) < 9 && len(withoutemptystrs[i+1]) < 9 {
+			// add biwords
+			out = append(out, str+" "+withoutemptystrs[i+1])
+		}
 	}
 	return out
 }
@@ -245,11 +237,7 @@ func isLiteral(token string) bool {
 			break
 		}
 	}
-	if !found {
-		return false
-	}
-
-	return true
+	return found
 }
 
 var Vietnam_letter = map[rune]rune{

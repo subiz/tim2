@@ -45,34 +45,51 @@ import (
 // + Sử dụng 1 bảng:
 //   CREATE KEYSPACE tim2 WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'};
 //
-//   CREATE TABLE tim2.term_doc(col ASCII, acc ASCII, term ASCII, doc ASCII, PRIMARY KEY ((col, acc, term), doc, part)) WITH CLUSTERING ORDER BY (doc DESC, part DESC);
+//   CREATE TABLE tim2.term_doc(date BIGINT, col ASCII, acc ASCII, term ASCII, doc ASCII, PRIMARY KEY ((col, acc, term), doc, part)) WITH CLUSTERING ORDER BY (doc DESC, part DESC);
 //     dùng để tìm kiếm docs theo term
 //
 
+// task (date BIGINT, acc ASCII, term TEXT, doc ASCII, PRIMARY KEY((date, acc, term), doc))
+// order(date BIGINT, acc ASCII, term TEXT, doc ASCII, PRIMARY KEY((date, acc, term), doc)) // product // user email
+// convo(date BIGINT, acc ASCII, term TEXT, doc ASCII, PRIMARY KEY((date, acc, term), doc))
+
+// CREATE TABLE terms (col ASCII, acc ASCII, term TEXT, day BIGINT, doc ASCII, part ASCII, PRIMARY KEY((col, acc, term), day, doc, part)) WITH CLUSTERING ORDER BY (day DESC, doc DESC, part DESC);
+// CREATE TABLE docs (col ASCII, acc ASCII, term TEXT, doc ASCII, part ASCII, PRIMARY KEY ((col, acc, term, doc), term, part))
+
+// INSERT INTO terms(col, acc, term, date, doc, part) VALUES('test', 'acctest', 'thanh', 4000, 'cs123', 'p1');
+// INSERT INTO terms(col, acc, term, day, doc, part) VALUES('test', 'acctest', 'thanh', 4000, 'cs1', 'p1');
+// INSERT INTO terms(col, acc, term, day, doc, part) VALUES('test', 'acctest', 'thanh', 4100, 'cs2', 'p2');
+// INSERT INTO terms(col, acc, term, day, doc, part) VALUES('test', 'acctest', 'thanh', 4200, 'cs3', 'p3');
+// INSERT INTO terms(col, acc, term, day, doc, part) VALUES('test', 'acctest', 'thanh', 4300, 'cs6', 'p4');
+// INSERT INTO terms(col, acc, term, day, doc, part) VALUES('test', 'acctest', 'thanh', 4400, 'cs4', 'p5');
+// INSERT INTO terms(col, acc, term, day, doc, part) VALUES('test', 'acctest', 'thanh', 4500, 'cs5', 'p6');
+// docs (col ASCII, acc ASCII, doc ASCII, term ASCII, PRIMARY KEY((col, acc, doc), term));
+
+// # list all task that have user contains keyword 'thanh'
+// SELECT * FROM terms where acc='acctest' AND col='test' AND term='thanh' ORDER BY day DESC;
+//
+// # when update user, just
+
+// # list all task that contains keyword 'thanh'
+// SELECT from terms where date='05-2022' AND col='task' AND acc='acsble' AND term='thanh' AND typ='task'
+
 // text => term
 
-// isMatchOtherTerms checks to see if the document part match all the terms (except for the first one)
-func isMatchOtherTerms(collection, accid, docid, part string, terms []string) bool {
-	for i, term := range terms {
-		if i == 0 {
-			continue
-		}
-		dump := ""
-		db.Query("SELECT doc FROM tim2.term_doc WHERE col=? AND acc=? AND term=? AND doc=? AND part=? LIMIT 1", collection, accid, term, docid, part).Scan(&dump)
-		if dump == "" {
-			return false
-		}
-	}
-	return true
+func SearchPart(collection, accid, query string, limit int, validate func(doc, part string) bool) ([]string, []string, error) {
+	return doSearch(collection, accid, query, limit, validate, false)
 }
 
 // Search all docs that match the query
 // docs, terms, anchor, error
-func Search(collection, accid, query, anchor string, limit int, ownerCheck func(doc string) bool) ([]string, []string, string, error) {
+func Search(collection, accid, query string, limit int, validate func(doc, part string) bool) ([]string, []string, error) {
+	return doSearch(collection, accid, query, limit, validate, true)
+}
+
+func doSearch(collection, accid, query string, limit int, validate func(doc, part string) bool, doc_distinct bool) ([]string, []string, error) {
 	waitforstartup(collection, accid)
 	interms := Tokenize(query)
 	if len(interms) == 0 {
-		return []string{}, []string{}, anchor, nil
+		return []string{}, []string{}, nil
 	}
 
 	// long query
@@ -102,44 +119,49 @@ func Search(collection, accid, query, anchor string, limit int, ownerCheck func(
 	// contain all matched doc
 	hitDocs := []string{}
 	hitParts := []string{}
-	startdoc := "zzzz"
-	startpart := "zzzz"
-	anchorSplit := strings.Split(anchor, ";;;;")
-	if len(anchorSplit) == 2 {
-		// search inside the doc first
-		startdoc, startpart = anchorSplit[0], anchorSplit[1]
-		iter := db.Query("SELECT doc, part FROM tim2.term_doc WHERE col=? AND acc=? AND term=? AND doc=? AND part<?", collection, accid, terms[0], startdoc, startpart).Iter()
-		var docid, part string
-		for iter.Scan(&docid, &part) {
-			// the doc must match owners condition
-			if !ownerCheck(docid) {
-				continue
-			}
 
-			if !isMatchOtherTerms(collection, accid, docid, part, terms) {
-				continue
-			}
-
-			hitDocs, hitParts = append(hitDocs, docid), append(hitParts, part)
-			if len(hitDocs) >= limit {
-				break
-			}
-		}
-		if err := iter.Close(); err != nil {
-			return nil, nil, "", err
-		}
-	}
-
-	iter := db.Query("SELECT doc, part FROM tim2.term_doc WHERE col=? AND acc=? AND term=? AND doc<?", collection, accid, terms[0], startdoc).Iter()
+	iter := db.Query("SELECT doc, part FROM tim2.terms WHERE col=? AND acc=? AND term=? ORDER BY day DESC", collection, accid, terms[0]).Iter()
 	var docid, part string
 	for iter.Scan(&docid, &part) {
-		// the doc must match owners condition
-		if !ownerCheck(docid) {
+		// de-duplicate by doc id, since we index document in multiple day
+		alreadyhitdoc := false
+		alreadyhitdocpart := false
+		for i, hit := range hitDocs {
+			if docid == hit {
+				alreadyhitdoc = true
+				if hitParts[i] == part {
+					alreadyhitdocpart = true
+				}
+			}
+		}
+
+		// both doc id and part id already found
+		if alreadyhitdocpart {
+			continue
+		}
+
+		// skip if user want doc distinct and doc already found
+		if doc_distinct && alreadyhitdoc {
+			continue
+		}
+
+		if !validate(docid, part) {
 			continue
 		}
 
 		// the doc must match all other terms
-		if !isMatchOtherTerms(collection, accid, docid, part, terms) {
+		matchAll := true
+		for i := 1; i < len(terms); i++ {
+			term := terms[i]
+			dump := ""
+			db.Query("SELECT doc FROM tim2.docs WHERE col=? AND acc=? AND term=? AND doc=? AND part=? LIMIT 1", collection, accid, term, docid, part).Scan(&dump)
+			if dump == "" {
+				matchAll = false
+				break
+			}
+		}
+
+		if !matchAll {
 			continue
 		}
 
@@ -149,26 +171,49 @@ func Search(collection, accid, query, anchor string, limit int, ownerCheck func(
 		}
 	}
 	if err := iter.Close(); err != nil {
-		return nil, nil, "", err
+		return nil, nil, err
 	}
-
-	if len(hitDocs) == 0 {
-		return []string{}, []string{}, anchor, nil
-	}
-
-	anchor = hitDocs[len(hitDocs)-1] + ";;;;" + hitParts[len(hitParts)-1]
-	return hitDocs, hitParts, anchor, nil
+	return hitDocs, hitParts, nil
 }
 
-func AppendText(collection, accid, docId, part, text string) error {
-	waitforstartup(collection, accid)
+func doIndex(collection, accid, docId, part string, day int, text string) error {
 	terms := Tokenize(text)
-	for _, term := range terms {
-		if err := db.Query("INSERT INTO tim2.term_doc(col,acc,term,doc,part) VALUES(?,?,?,?,?)", collection, accid, term, docId, part).Exec(); err != nil {
+	batch := db.NewBatch(gocql.LoggedBatch)
+	for i, term := range terms {
+		batch.Query("INSERT INTO tim2.terms(col,acc,term,day,doc,part) VALUES(?,?,?,?,?,?)", collection, accid, term, day, docId, part)
+		batch.Query("INSERT INTO tim2.docs(col,acc,doc,term,part) VALUES(?,?,?,?,?)", collection, accid, docId, term, part)
+		if i%50 == 0 {
+			if err := db.ExecuteBatch(batch); err != nil {
+				return err
+			}
+			batch = db.NewBatch(gocql.LoggedBatch)
+		}
+	}
+
+	if batch.Size() > 0 {
+		if err := db.ExecuteBatch(batch); err != nil {
 			return err
 		}
 	}
 	return nil
+
+}
+
+func IndexText(collection, accid, docId, part string, day int, text string) error {
+	waitforstartup(collection, accid)
+
+	// clear term first
+	err := db.Query("DELETE FROM tim2.docs WHERE col=? AND acc=? AND doc=? VALUES(?,?,?)", collection, accid, docId).Exec()
+	if err != nil {
+		return err
+	}
+
+	return doIndex(collection, accid, docId, part, day, text)
+}
+
+func AppendText(collection, accid, docId, part string, day int, text string) error {
+	waitforstartup(collection, accid)
+	return doIndex(collection, accid, docId, part, day, text)
 }
 
 var startupLock sync.Mutex
