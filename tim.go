@@ -9,7 +9,6 @@ import (
 
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 )
@@ -87,35 +86,13 @@ func Search(collection, accid, query string, limit int, validate func(doc, part 
 
 func doSearch(collection, accid, query string, limit int, validate func(doc, part string) bool, doc_distinct bool) ([]string, []string, error) {
 	waitforstartup(collection, accid)
-	interms := Tokenize(query)
-	if len(interms) == 0 {
+	terms := Tokenize(query)
+	if len(terms) == 0 {
 		return []string{}, []string{}, nil
 	}
 
 	// long query
-	var terms []string
-	if len(interms) > 5 {
-		biwords := make([]string, 0)
-		for _, term := range interms {
-			if strings.Contains(term, " ") {
-				biwords = append(biwords, term)
-			}
-		}
-		terms = make([]string, 0)
-		for i := 0; i < 2 && i < len(biwords); i++ {
-			terms = append(terms, biwords[i])
-		}
-		if len(terms) < 2 {
-			for i := 0; i < 5-len(terms); i++ {
-				terms = append(terms, interms[i])
-			}
-		}
-	} else {
-		terms = interms
-	}
-	// order by length desc
 	sort.Slice(terms, func(i, j int) bool { return len(terms[i]) > len(terms[j]) })
-
 	// contain all matched doc
 	hitDocs := []string{}
 	hitParts := []string{}
@@ -151,7 +128,7 @@ func doSearch(collection, accid, query string, limit int, validate func(doc, par
 
 		// the doc must match all other terms
 		matchAll := true
-		for i := 1; i < len(terms); i++ {
+		for i := 1; i < len(terms) && i < 5; i++ {
 			term := terms[i]
 			dump := ""
 			db.Query("SELECT doc FROM tim2.docs WHERE col=? AND acc=? AND term=? AND doc=? AND part=? LIMIT 1", collection, accid, term, docid, part).Scan(&dump)
@@ -176,7 +153,13 @@ func doSearch(collection, accid, query string, limit int, validate func(doc, par
 	return hitDocs, hitParts, nil
 }
 
-func doIndex(collection, accid, docId, part string, day int, text string) error {
+func ClearText(collection, accid, docId string) error {
+	waitforstartup(collection, accid)
+	return db.Query("DELETE FROM tim2.docs WHERE col=? AND acc=? AND doc=? VALUES(?,?,?)", collection, accid, docId).Exec()
+}
+
+func AppendText(collection, accid, docId, part string, day int, text string) error {
+	waitforstartup(collection, accid)
 	terms := Tokenize(text)
 	batch := db.NewBatch(gocql.LoggedBatch)
 	for i, term := range terms {
@@ -196,24 +179,6 @@ func doIndex(collection, accid, docId, part string, day int, text string) error 
 		}
 	}
 	return nil
-
-}
-
-func IndexText(collection, accid, docId, part string, day int, text string) error {
-	waitforstartup(collection, accid)
-
-	// clear term first
-	err := db.Query("DELETE FROM tim2.docs WHERE col=? AND acc=? AND doc=? VALUES(?,?,?)", collection, accid, docId).Exec()
-	if err != nil {
-		return err
-	}
-
-	return doIndex(collection, accid, docId, part, day, text)
-}
-
-func AppendText(collection, accid, docId, part string, day int, text string) error {
-	waitforstartup(collection, accid)
-	return doIndex(collection, accid, docId, part, day, text)
 }
 
 var startupLock sync.Mutex

@@ -1,9 +1,12 @@
 package tim2
 
 import (
+	_ "fmt"
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/thanhpk/ascii"
 )
 
 type MatchLiteral struct {
@@ -14,15 +17,17 @@ type MatchLiteral struct {
 var replacer = strings.NewReplacer("/", " ", "\"", " ", "/", " ", "_", " ", "'", " ", "{", " ", "}", " ",
 	"(", " ", ")", " ", "[", " ", "]", " ", "&", " ", "?", " ", "!", " ", "=", " ", ">", " ", "<", " ")
 
+// var replacerLiteral = strings.NewReplacer("-", " ", "_", " ")
+
 func splitSentence(r rune) bool {
-	return r == ':' || r == ';' || r == '\n' || r == ','
+	if r >= '0' && r <= '9' {
+		return false
+	}
+	return r < 'A' || r > 'z'
 }
 
 func Tokenize(str string) []string {
-	str = replacer.Replace(str)
-	str = strings.ToLower(str)
-	strs := strings.FieldsFunc(str, splitSentence)
-
+	str = strings.TrimSpace(strings.ToLower(str))
 	tokenM := make(map[string]bool)
 
 	// phones and emails
@@ -36,22 +41,54 @@ func Tokenize(str string) []string {
 		tokenM[t] = true
 	}
 
+	str = ascii.Convert(str)
+
+	tokens = tokenizeFilename(str)
+	for _, t := range tokens {
+		tokenM[t] = true
+	}
+
+	// remove space and weird characters
+	str = replacer.Replace(str)
+	str = strings.Join(strings.Fields(str), " ")
+
+	strs := strings.FieldsFunc(str, splitSentence)
+
+	lines := [][]string{}
+	line := []string{}
 	for _, str := range strs {
-		tokens = tokenizeLiteralVietnamese(str)
-		for _, t := range tokens {
-			tokenM[t] = true
+		if len(str) == 0 {
+			continue
 		}
 
-		tokens = tokenizeFilename(str)
-		for _, t := range tokens {
-			//fmt.Println("TT22", t)
-			tokenM[t] = true
+		line = append(line, str)
+		if len(str) < 2 || utf8.RuneCountInString(str) < 2 {
+			lines = append(lines, line)
+			line = []string{}
+			continue
 		}
+	}
+	if len(line) > 0 {
+		lines = append(lines, line)
+	}
+	for _, line := range lines {
+		for i, word := range line {
+			if len(word) > Token_max_len {
+				continue
+			}
 
-		tokens = tokenizeLiteral(str)
-		for _, t := range tokens {
-			// fmt.Println("TT3", t)
-			tokenM[t] = true
+			if !stopWordM[word] && len(word) > Token_min_len {
+				tokenM[word] = true
+			}
+
+			// could have bi-word
+			if i < len(line)-1 {
+				if len(word) > 9 || len(line[i+1]) > 9 /* we dont want be-word to long */ {
+					continue
+				}
+
+				tokenM[word+"-"+line[i+1]] = true
+			}
 		}
 	}
 
@@ -63,13 +100,8 @@ func Tokenize(str string) []string {
 }
 
 const Email_regex = `([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)`
-const Email_letter = "abcdefghijklmnopqrstuvwxyz"
-const Email_digit = "0123456789"
-const Email_format = "@-_."
-const Email_min_len = 5
 
 var Email_regexp = regexp.MustCompile(Email_regex)
-var Email_norm_map map[rune]rune
 
 // +84 2473.021.368
 const PersonalPhoneNumber_digit = "0123456789"
@@ -111,56 +143,6 @@ func findPersonalPhoneNumber(str string) []string {
 	return phoneNumbers
 }
 
-// TODO psrc
-func tokenizeLiteral(str string) []string {
-	literals := make([]*MatchLiteral, 0)
-	biliterals := make([]*MatchLiteral, 0)
-
-	str += " "
-	rarr := []rune(str)
-	from, to := 0, 0
-	var prevliteral string
-	for i, r := range rarr {
-		if _, has := Norm_map[r]; has {
-			to++
-			continue
-		}
-
-		normtoken := make([]rune, to-from)
-		for j, tr := range rarr[from:to] {
-			normtoken[j] = Norm_map[tr]
-		}
-		literal := string(normtoken)
-		// TODO trim format rune
-		if len(literal) > 0 && !Stopword_map[literal] && isLiteral(literal) {
-			literals = append(literals, &MatchLiteral{Str: literal})
-		}
-		if len(prevliteral) > 0 && len(literal) > 0 && !Stopword_map[literal] && isLiteral(prevliteral) &&
-			len(prevliteral) < 9 && len(literal) < 9 /* we dont want be-word to long */ {
-			biliterals = append(biliterals, &MatchLiteral{Str: string(prevliteral) + " " + literal})
-		}
-
-		prevliteral = literal
-		from, to = i+1, i+1
-	}
-
-	strarr := make([]string, len(literals)+len(biliterals))
-	strindex := 0
-	for _, literal := range literals {
-		strarr[strindex] = literal.Str
-		strindex++
-	}
-	for _, literal := range biliterals {
-		strarr[strindex] = literal.Str
-		strindex++
-	}
-	return strarr
-}
-
-func splitSpace(r rune) bool {
-	return r == ' ' || r == '\t' || r == '.'
-}
-
 func tokenizeFilename(str string) []string {
 	strs := strings.FieldsFunc(str, func(r rune) bool {
 		return r == ' ' || r == '\t'
@@ -185,83 +167,8 @@ func tokenizeFilename(str string) []string {
 	return out
 }
 
-func tokenizeLiteralVietnamese(str string) []string {
-	strs := strings.FieldsFunc(str, splitSpace)
-	out := []string{}
-	withoutemptystrs := []string{}
-	for _, str := range strs {
-		if len(str) < 2 || utf8.RuneCountInString(str) < 2 {
-			continue
-		}
-
-		if len(str) > 0 {
-			withoutemptystrs = append(withoutemptystrs, str)
-		}
-	}
-
-	for i, str := range withoutemptystrs {
-		if len(str) > 2 {
-			if len(str) > 45 {
-				out = append(out, str[:44])
-			} else {
-				out = append(out, str)
-			}
-		}
-
-		if i == len(withoutemptystrs)-1 {
-			continue
-		}
-
-		if len(str) > 45 || len(withoutemptystrs[i+1]) > 45 {
-			continue
-		}
-
-		if len(str) < 9 && len(withoutemptystrs[i+1]) < 9 {
-			// add biwords
-			out = append(out, str+" "+withoutemptystrs[i+1])
-		}
-	}
-	return out
-}
-
-func isLiteral(token string) bool {
-	if len(token) < 2 || len(token) > 45 {
-		return false
-	}
-	// TODO first consonants
-	// TOOD rhyme: accompaniment, main sound, end sound
-	found := false
-	for _, r := range token {
-		if _, has := Vietnam_vowel_unaccented_map[r]; has {
-			found = true
-			break
-		}
-	}
-	return found
-}
-
-var Vietnam_letter = map[rune]rune{
-	'ạ': 'a', 'ả': 'a', 'ã': 'a', 'à': 'a', 'á': 'a', 'â': 'a', 'ậ': 'a', 'ầ': 'a', 'ấ': 'a',
-	'ẩ': 'a', 'ẫ': 'a', 'ă': 'a', 'ắ': 'a', 'ằ': 'a', 'ặ': 'a', 'ẳ': 'a', 'ẵ': 'a',
-	'ó': 'o', 'ò': 'o', 'ọ': 'o', 'õ': 'o', 'ỏ': 'o', 'ô': 'o', 'ộ': 'o', 'ổ': 'o', 'ỗ': 'o',
-	'ồ': 'o', 'ố': 'o', 'ơ': 'o', 'ờ': 'o', 'ớ': 'o', 'ợ': 'o', 'ở': 'o', 'ỡ': 'o',
-	'é': 'e', 'è': 'e', 'ẻ': 'e', 'ẹ': 'e', 'ẽ': 'e', 'ê': 'e', 'ế': 'e', 'ề': 'e', 'ệ': 'e', 'ể': 'e', 'ễ': 'e',
-	'ú': 'u', 'ù': 'u', 'ụ': 'u', 'ủ': 'u', 'ũ': 'u', 'ư': 'u', 'ự': 'u', 'ữ': 'u', 'ử': 'u', 'ừ': 'u', 'ứ': 'u',
-	'í': 'i', 'ì': 'i', 'ị': 'i', 'ỉ': 'i', 'ĩ': 'i',
-	'ý': 'y', 'ỳ': 'y', 'ỷ': 'y', 'ỵ': 'y', 'ỹ': 'y',
-	'đ': 'd',
-}
-
 const Token_min_len = 2
 const Token_max_len = 45
-const Vietnam_word_max_len = 7
-const Vietnam_vowel = "i, e, ê, ư, u, o, ô, ơ, a, ă, â"
-
-var Vietnam_vowel_unaccented_map map[rune]struct{}
-
-var Str_letter = "abcdefghijklmnopqrstuvwxyz"
-var Str_digit = "0123456789"
-var Str_special = "-_"
 
 var Norm_map map[rune]rune
 
@@ -270,28 +177,7 @@ const RegexPhone = `([0-9._-]{3,})`
 var Regexp_phone = regexp.MustCompile(RegexPhone)
 
 // see http://www.clc.hcmus.edu.vn/?page_id=1507
-const Stopword_vi = "va, cua, co, cac, la, and, or"
-const Stopword_heuristic = "gmail, com, subiz"
-
-var Stopword_map map[string]bool
-
-func initEmailKit() {
-	Email_norm_map = make(map[rune]rune)
-	for _, r := range Email_digit {
-		Email_norm_map[r] = r
-	}
-	for _, r := range Email_letter {
-		Email_norm_map[r] = r
-	}
-	upperstr := strings.ToUpper(Email_letter)
-	runeArr := []rune(Email_letter)
-	for i, r := range upperstr {
-		Email_norm_map[r] = runeArr[i]
-	}
-	for _, r := range Email_format {
-		Email_norm_map[r] = r
-	}
-}
+var stopWordM = map[string]bool{}
 
 func initPhoneKit() {
 	PersonalPhoneNumber_norm_map = make(map[rune]rune)
@@ -304,56 +190,12 @@ func initPhoneKit() {
 }
 
 func init() {
-	initEmailKit()
 	initPhoneKit()
-
-	Norm_map = make(map[rune]rune)
-	for _, r := range Str_letter {
-		Norm_map[r] = r
-	}
-	upperstr := strings.ToUpper(Str_letter)
-	runeArr := []rune(Str_letter)
-	for i, r := range upperstr {
-		Norm_map[r] = runeArr[i]
-	}
-	for _, r := range Str_digit {
-		Norm_map[r] = r
-	}
-	for _, r := range Str_special {
-		Norm_map[r] = r
-	}
-
-	for vi, r := range Vietnam_letter {
-		Norm_map[vi] = r
-	}
-	accentedLetters := make([]rune, len(Vietnam_letter))
-	unaccentedLetters := make([]rune, len(Vietnam_letter))
-	lindex := 0
-	for al, unal := range Vietnam_letter {
-		accentedLetters[lindex] = al
-		unaccentedLetters[lindex] = unal
-		lindex++
-	}
-	upperaccentedLetters := make([]rune, len(accentedLetters))
-	upperalindex := 0
-	for _, r := range strings.ToUpper(string(accentedLetters)) {
-		upperaccentedLetters[upperalindex] = r
-		upperalindex++
-	}
-	for i, upperal := range upperaccentedLetters {
-		Norm_map[upperal] = unaccentedLetters[i]
-	}
-
-	Vietnam_vowel_unaccented_map = make(map[rune]struct{})
-	for _, r := range Vietnam_vowel {
-		if nr, has := Norm_map[r]; has {
-			Vietnam_vowel_unaccented_map[nr] = struct{}{}
+	for _, stopword := range stopwords {
+		stopword = strings.TrimSpace(stopword)
+		if len(stopword) > 0 {
+			stopWordM[stopword] = true
 		}
 	}
 
-	Stopword_map = map[string]bool{}
-	stopwordstr := Stopword_vi + ", " + Stopword_heuristic
-	for _, word := range strings.Split(stopwordstr, ", ") {
-		Stopword_map[word] = true
-	}
 }
