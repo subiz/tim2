@@ -1,7 +1,6 @@
 package tim2
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -13,11 +12,13 @@ const Token_min_len = 2
 const Token_max_len = 45
 
 var replacer = strings.NewReplacer("/", " ", "\"", " ", "/", " ", "_", " ", "'", " ", "{", " ", "}", " ",
-	"(", " ", ")", " ", "[", " ", "]", " ", "&", " ", "?", " ", "!", " ", "=", " ", ">", " ", "<", " ")
-
-// var replacerLiteral = strings.NewReplacer("-", " ", "_", " ")
+	"(", " ", ")", " ", "[", " ", "]", " ", "&", " ", "?", " ", "!", " ", "=", " ", ">", " ", "<", " ", "~", " ", ":", " ")
 
 func splitSentence(r rune) bool {
+	if r == '_' {
+		return false
+	}
+
 	if r == '-' {
 		return false
 	}
@@ -53,7 +54,6 @@ func Tokenize(str string) []string {
 	str = replacer.Replace(str)
 	str = strings.Join(strings.Fields(str), " ")
 
-	fmt.Println("SSSSSSSSSS", str)
 	tokens = tokenizeFilename(str)
 	for _, t := range tokens {
 		tokenM[t] = true

@@ -3,30 +3,30 @@ package tim2
 import "strings"
 
 var stopwords = strings.Split(`
-	va
-	cua
-	co
-	cac
-	la
-	and
-	or
-	is
-	gmail
-	com
-	subiz
-	a
-	about
-	above
-	after
-	again
-	against
-	all
-	am
-	an
-	and
-	any
-	are
-	aren't
+va
+cua
+co
+cac
+la
+and
+or
+is
+gmail
+com
+subiz
+a
+about
+above
+after
+again
+against
+all
+am
+an
+and
+any
+are
+aren't
 as
 at
 be
