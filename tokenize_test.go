@@ -9,7 +9,7 @@ import (
 func TestShortQuery(t *testing.T) {
 	// interms := Tokenize("cong hoa xahoi chu hi")
 	// interms := Tokenize("cộng hòa xã    \thội\t chủ nghĩa Việt Nam.độc \nlập")
-	interms := Tokenize("vào -  thanh + hoa")
+	interms := Tokenize("Launch HN: Fogbender (YC W22) – B2B support software designed for customer teams (fogbender.com)")
 	fmt.Printf("%#v\n", interms)
 	var terms []string
 	if len(interms) > 5 {

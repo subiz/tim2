@@ -1,6 +1,7 @@
 package tim2
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -17,6 +18,14 @@ var replacer = strings.NewReplacer("/", " ", "\"", " ", "/", " ", "_", " ", "'",
 // var replacerLiteral = strings.NewReplacer("-", " ", "_", " ")
 
 func splitSentence(r rune) bool {
+	if r == '-' {
+		return false
+	}
+
+	if r == '.' {
+		return false
+	}
+
 	if r >= '0' && r <= '9' {
 		return false
 	}
@@ -40,14 +49,15 @@ func Tokenize(str string) []string {
 
 	str = ascii.Convert(str)
 
+	// remove space and weird characters
+	str = replacer.Replace(str)
+	str = strings.Join(strings.Fields(str), " ")
+
+	fmt.Println("SSSSSSSSSS", str)
 	tokens = tokenizeFilename(str)
 	for _, t := range tokens {
 		tokenM[t] = true
 	}
-
-	// remove space and weird characters
-	str = replacer.Replace(str)
-	str = strings.Join(strings.Fields(str), " ")
 
 	strs := strings.FieldsFunc(str, splitSentence)
 
@@ -84,7 +94,7 @@ func Tokenize(str string) []string {
 					continue
 				}
 
-				tokenM[word+"-"+line[i+1]] = true
+				tokenM[word+" "+line[i+1]] = true
 			}
 		}
 	}
@@ -97,6 +107,7 @@ func Tokenize(str string) []string {
 }
 
 const Email_regex = `([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)`
+
 var Email_regexp = regexp.MustCompile(Email_regex)
 
 // +84 2473.021.368
