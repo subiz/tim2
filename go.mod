@@ -3,7 +3,7 @@ module github.com/subiz/tim2
 go 1.17
 
 require (
-	github.com/gocql/gocql v0.0.0-20211222173705-d73e6b1002a7
+	github.com/gocql/gocql v0.0.0-20220224095938-0eacd3183625
 	github.com/thanhpk/ascii v0.0.3
 )
 
