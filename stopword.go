@@ -3,8 +3,13 @@ package tim2
 import "strings"
 
 var stopwords = strings.Split(`
+anh
 va
+minh
 cua
+anh
+chi
+ban
 co
 cac
 la
@@ -12,6 +17,8 @@ and
 or
 is
 gmail
+gmail.com
+gi a
 com
 subiz
 a
@@ -40,37 +47,37 @@ both
 but
 by
 can't
-	cannot
-	could
-	couldn't
+cannot
+could
+couldn't
 did
 didn't
-	do
-	does
-	doesn't
+do
+does
+doesn't
 doing
 don't
-	down
-	during
-	each
-	few
-	for
-	from
-	further
-	had
-	hadn't
+down
+during
+each
+few
+for
+from
+further
+had
+hadn't
 has
 hasn't
-	have
-	haven't
+have
+haven't
 having
 he
 he'd
-	he'll
+he'll
 he's
-	her
-	here
-	here's
+her
+here
+here's
 hers
 herself
 him
@@ -78,21 +85,21 @@ himself
 his
 how
 how's
-	i
-	i'd
+i
+i'd
 i'll
-	i'm
+i'm
 i've
-	if
-	in
-	into
-	is
-	isn't
+if
+in
+into
+is
+isn't
 it
 it's
-	its
-	itself
-	let's
+its
+itself
+let's
 me
 more
 most
@@ -119,30 +126,31 @@ mustn't
 	shan't
 she
 she'd
-	she'll
+she'll
 she's
-	should
-	shouldn't
+should
+shouldn't
 so
 some
 such
+thi
 than
 that
 that's
-	the
-	their
-	theirs
-	them
-	themselves
-	then
-	there
-	there's
+the
+their
+theirs
+them
+themselves
+then
+there
+there's
 these
 they
 they'd
-	they'll
+they'll
 they're
-	they've
+they've
 this
 those
 through

@@ -12,7 +12,8 @@ const Token_min_len = 2
 const Token_max_len = 45
 
 var replacer = strings.NewReplacer("/", " ", "\"", " ", "/", " ", "_", " ", "'", " ", "{", " ", "}", " ",
-	"(", " ", ")", " ", "[", " ", "]", " ", "&", " ", "?", " ", "!", " ", "=", " ", ">", " ", "<", " ", "~", " ", ":", " ")
+	"(", " ", ")", " ", "[", " ", "]", " ", "&", " ", "?", " ", "!", " ", "=", " ", ">", " ", "<", " ", "~", " ", ":", " ",
+	". ", " ", ", ", " ", "; ", " ", " - ", " ")
 
 func splitSentence(r rune) bool {
 	if r == '_' {
@@ -45,17 +46,24 @@ func Tokenize(str string) []string {
 	}
 	tokens = append(tokens, findPersonalPhoneNumber(str)...)
 	for _, t := range tokens {
+		if len(t) == 0 {
+			continue
+		}
 		tokenM[t] = true
 	}
 
 	str = ascii.Convert(str)
 
 	// remove space and weird characters
-	str = replacer.Replace(str)
-	str = strings.Join(strings.Fields(str), " ")
+	str = strings.Replace(str, "\n", " ", -1)
+	str = replacer.Replace(" " + str + " ")
 
+	str = strings.Join(strings.Fields(str), " ")
 	tokens = tokenizeFilename(str)
 	for _, t := range tokens {
+		if len(t) == 0 {
+			continue
+		}
 		tokenM[t] = true
 	}
 
@@ -67,7 +75,6 @@ func Tokenize(str string) []string {
 		if len(str) == 0 {
 			continue
 		}
-
 		line = append(line, str)
 		if len(str) < 2 || utf8.RuneCountInString(str) < 2 {
 			lines = append(lines, line)
@@ -85,6 +92,9 @@ func Tokenize(str string) []string {
 			}
 
 			if !stopWordM[word] && len(word) > Token_min_len {
+				if len(word) == 0 {
+					continue
+				}
 				tokenM[word] = true
 			}
 
@@ -92,6 +102,25 @@ func Tokenize(str string) []string {
 			if i < len(line)-1 {
 				if len(word) > 9 || len(line[i+1]) > 9 /* we dont want be-word to long */ {
 					continue
+				}
+
+				// both word must have meaning
+				if len(word) == 1 {
+					r := word[0]
+
+					// not a good word
+					if (r < '0' || r > '9') && r < 'A' || r > 'z' {
+						continue
+					}
+				}
+
+				if len(line[i+1]) == 1 {
+					r := line[i+1][0]
+
+					// not a good word
+					if (r < '0' || r > '9') && r < 'A' || r > 'z' {
+						continue
+					}
 				}
 
 				tokenM[word+" "+line[i+1]] = true
