@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -42,20 +43,10 @@ import (
 //
 // Thiết kế:
 // + Trong database chỉ lữu trữ docId, nội dung doc không quan tâm và không lưu
-// + Sử dụng 1 bảng:
-//   CREATE KEYSPACE tim2 WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'};
-//
-//   CREATE TABLE tim2.term_doc(date BIGINT, col ASCII, acc ASCII, term ASCII, doc ASCII, PRIMARY KEY ((col, acc, term), doc, part)) WITH CLUSTERING ORDER BY (doc DESC, part DESC);
-//     dùng để tìm kiếm docs theo term
-//
-
-// task (date BIGINT, acc ASCII, term TEXT, doc ASCII, PRIMARY KEY((date, acc, term), doc))
-// order(date BIGINT, acc ASCII, term TEXT, doc ASCII, PRIMARY KEY((date, acc, term), doc)) // product // user email
-// convo(date BIGINT, acc ASCII, term TEXT, doc ASCII, PRIMARY KEY((date, acc, term), doc))
-
-// CREATE TABLE config(k ASCII, version BIGINT, PRIMARY KEY(k));
-// CREATE TABLE terms (col ASCII, acc ASCII, term TEXT, day BIGINT, doc ASCII, part ASCII, PRIMARY KEY((col, acc, term), day, doc, part)) WITH CLUSTERING ORDER BY (day DESC, doc DESC, part DESC);
-// CREATE TABLE docs (col ASCII, acc ASCII, term TEXT, doc ASCII, part ASCII, day BIGINT, PRIMARY KEY((col, acc, doc), term, part, day));
+// + Sử dụng 2 bảng:
+// CREATE KEYSPACE tim2 WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'};
+// CREATE TABLE terms (col ASCII, acc ASCII, term ASCII, day INT, doc ASCII, part ASCII, PRIMARY KEY((col, acc, term), day, doc, part)) WITH CLUSTERING ORDER BY (day DESC, doc DESC, part DESC);
+// CREATE TABLE docs2 (col ASCII, acc ASCII, terms LIST<ASCII>, doc ASCII, part ASCII, day INT, PRIMARY KEY((col, acc, doc), part));
 
 // INSERT INTO terms(col, acc, term, date, doc, part) VALUES('test', 'acctest', 'thanh', 4000, 'cs123', 'p1');
 // INSERT INTO terms(col, acc, term, day, doc, part) VALUES('test', 'acctest', 'thanh', 4000, 'cs1', 'p1');
@@ -66,51 +57,102 @@ import (
 // INSERT INTO terms(col, acc, term, day, doc, part) VALUES('test', 'acctest', 'thanh', 4500, 'cs5', 'p6');
 // docs (col ASCII, acc ASCII, doc ASCII, term ASCII, PRIMARY KEY((col, acc, doc), term));
 
-// # list all task that have user contains keyword 'thanh'
-// SELECT * FROM terms where acc='acctest' AND col='test' AND term='thanh' ORDER BY day DESC;
-//
-// # when update user, just
-
-// # list all task that contains keyword 'thanh'
-
-// SELECT from terms where date='05-2022' AND col='task' AND acc='acsble' AND term='thanh' AND typ='task'
-
-// text => term
-
-func SearchPart(collection, accid, query string, limit int, validate func(doc, part string) bool) ([]string, []string, error) {
-	return doSearch(collection, accid, query, limit, validate, false)
+func SearchPart(col, accid, query, anchor string) ([]Hit, string, error) {
+	return doSearch(col, accid, query, anchor, nil, 30, false)
 }
 
 // Search all docs that match the query
 // docs, terms, anchor, error
-func Search(collection, accid, query string, limit int, validate func(doc, part string) bool) ([]string, []string, error) {
-	return doSearch(collection, accid, query, limit, validate, true)
+func Search(col, accid, query, anchor string) ([]Hit, string, error) {
+	return doSearch(col, accid, query, anchor, nil, 30, true)
 }
 
-func doSearch(collection, accid, query string, limit int, validate func(doc, part string) bool, doc_distinct bool) ([]string, []string, error) {
+func SearchPartOnly(col, accid, query, anchor string, only_parts []string, limit int) ([]Hit, string, error) {
+	return doSearch(col, accid, query, anchor, only_parts, 30, false)
+}
+
+type Hit struct {
+	doc  string
+	part string
+}
+
+func doSearch(collection, accid, query, anchor string, only_parts []string, limit int, doc_distinct bool) ([]Hit, string, error) {
 	waitforstartup()
 	terms := Tokenize(query)
 	if len(terms) == 0 {
-		return []string{}, []string{}, nil
+		return nil, anchor, nil
 	}
+
+	// remove all child terms ('xin chao', 'xin', 'cong' => 'xin' is child term, 'cong' is not)
+	// only using parent terms to search, since doc match parent term will match child term
+	parentTerms := []string{}
+	for i := 0; i < len(terms); i++ {
+		isParent := true
+		for j := i + 1; j < len(terms); j++ {
+			if strings.Contains(terms[j], terms[i]) {
+				isParent = false
+				break
+			}
+
+		}
+		if isParent {
+			parentTerms = append(parentTerms, terms[i])
+		}
+	}
+
+	terms = parentTerms
 
 	// long query
 	sort.Slice(terms, func(i, j int) bool { return len(terms[i]) > len(terms[j]) })
 	// contain all matched doc
-	hitDocs := []string{}
-	hitParts := []string{}
 
-	version := getVersion()
-	iter := db.Query("SELECT doc, part FROM tim2.terms_"+strconv.Itoa(version)+" WHERE col=? AND acc=? AND term=? ORDER BY day DESC", collection, accid, terms[0]).Iter()
+	// anchor
+	anchorsplit := strings.Split(anchor, "_")
+	anchorday := int(time.Now().UnixNano() / 86400 * 10) // a very large day
+	matchanchor := true
+	if len(anchorsplit) > 2 {
+		i, err := strconv.Atoi(anchorsplit[0])
+		if err == nil {
+			// anchor is valid
+			matchanchor = false // need match anchor
+			anchorday = i
+		}
+	}
+
+	hits := []Hit{}
+	var day int
+	iter := db.Query("SELECT day, doc, part FROM tim2.terms WHERE col=? AND acc=? AND term=? AND day<=? ORDER BY day DESC", collection, accid, terms[0], anchorday).Iter()
 	var docid, part string
-	for iter.Scan(&docid, &part) {
+	for iter.Scan(&day, &docid, &part) {
+
+		// skip until pass the anchor mark
+		if day == anchorday && !matchanchor {
+			if fmt.Sprintf("%d_%s_%s", day, docid, part) == anchor {
+				matchanchor = true
+			}
+			continue
+		}
+
+		// filter parts if only_parts is pass in
+		if len(only_parts) > 0 {
+			found := false
+			for _, p := range only_parts {
+				if p == part {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
 		// de-duplicate by doc id, since we index document in multiple day
 		alreadyhitdoc := false
 		alreadyhitdocpart := false
-		for i, hit := range hitDocs {
-			if docid == hit {
+		for _, hit := range hits {
+			if docid == hit.doc {
 				alreadyhitdoc = true
-				if hitParts[i] == part {
+				if hit.part == part {
 					alreadyhitdocpart = true
 				}
 			}
@@ -126,13 +168,25 @@ func doSearch(collection, accid, query string, limit int, validate func(doc, par
 			continue
 		}
 
+		docterms := []string{}
+		var docday int
+		db.Query("SELECT day, terms FROM tim2.docs2 WHERE col=? AND acc=? AND doc=? AND part=? LIMIT 1", collection, accid, docid, part).Scan(&docday, &terms)
+		if docday != day {
+			continue // invalid doc
+		}
 		// the doc must match all other terms (max 5)
 		matchAll := true
 		for i := 1; i < len(terms) && i < 5; i++ {
 			term := terms[i]
-			dump := ""
-			db.Query("SELECT doc FROM tim2.docs WHERE col=? AND acc=? AND term=? AND doc=? AND part=? LIMIT 1", collection, accid, term, docid, part).Scan(&dump)
-			if dump == "" {
+			found := false
+			for _, dt := range docterms {
+				if term == dt {
+					found = true
+					break
+				}
+			}
+
+			if !found {
 				matchAll = false
 				break
 			}
@@ -142,38 +196,69 @@ func doSearch(collection, accid, query string, limit int, validate func(doc, par
 			continue
 		}
 
-		if !validate(docid, part) {
-			continue
-		}
-
-		hitDocs, hitParts = append(hitDocs, docid), append(hitParts, part)
-		if len(hitDocs) >= limit {
+		hits = append(hits, Hit{doc: docid, part: part})
+		anchor = fmt.Sprintf("%d_%s_%s", day, docid, part)
+		if len(hits) >= limit {
 			break
 		}
 	}
 	if err := iter.Close(); err != nil {
-		return nil, nil, err
+		return nil, anchor, err
 	}
-	return hitDocs, hitParts, nil
+	return hits, anchor, nil
 }
 
-func ClearText(collection, accid, docId string) error {
+// Index creates reverse index for document part
+// remove all old terms, write new terms
+func Index(col, accid, doc, part string, day int, text string) error {
 	waitforstartup()
-	return db.Query("DELETE FROM tim2.docs WHERE col=? AND acc=? AND doc=?", collection, accid, docId).Exec()
-}
-
-func AppendText(collection, accid, docId, part string, day int64, text string) error {
-	waitforstartup()
-	version := getVersion()
-
 	terms := Tokenize(text)
-	batch := db.NewBatch(gocql.LoggedBatch)
 
-	for i, term := range terms {
-		batch.Query("INSERT INTO tim2.terms_"+strconv.Itoa(version)+"(col,acc,term,day,doc,part) VALUES(?,?,?,?,?,?)", collection, accid, term, day, docId, part)
-		batch.Query("INSERT INTO tim2.terms_"+strconv.Itoa(version+1)+"(col,acc,term,day,doc,part) VALUES(?,?,?,?,?,?)", collection, accid, term, day, docId, part)
-		batch.Query("INSERT INTO tim2.docs(col,acc,doc,term,part,day) VALUES(?,?,?,?,?,?)", collection, accid, docId, term, part, day)
-		if i%50 == 0 {
+	var oldday int
+	var oldterms []string
+	db.Query("SELECT day, terms FROM tim2.docs2 WHERE col=? AND acc=? AND doc=? AND part=? LIMIT 1", col, accid, doc, part).Scan(&oldday, &oldterms)
+
+	// findings new terms (so we only have to remove outdated terms instead of all old terms)
+	var outdates, news []string
+	if oldday == day {
+		if len(oldterms) > 0 {
+			var oldM = map[string]bool{}
+			for _, o := range oldterms {
+				oldM[o] = true
+			}
+
+			var newM = map[string]bool{}
+			for _, n := range terms {
+				newM[n] = true
+			}
+
+			for _, n := range terms {
+				if !oldM[n] {
+					news = append(news, n)
+				}
+			}
+
+			for _, o := range oldterms {
+				if !newM[o] {
+					outdates = append(outdates, o)
+				}
+			}
+
+		} else {
+			// quick path for empty oldterms
+			news = terms
+		}
+	} else {
+		// difference day, must delete all outdated term
+		news = terms
+		outdates = oldterms
+	}
+
+	// delete old (outdated) terms
+	batch := db.NewBatch(gocql.LoggedBatch)
+	for i, term := range outdates {
+		batch.Query("DELETE FROM tim2.terms WHERE col=? AND acc=? AND term=? AND doc=? AND part=? AND day=?", col, accid, term, doc, part, day)
+		if batch.Size()%50 == 0 || (i == len(outdates)-1 && batch.Size() > 0) {
 			if err := db.ExecuteBatch(batch); err != nil {
 				return err
 			}
@@ -181,9 +266,18 @@ func AppendText(collection, accid, docId, part string, day int64, text string) e
 		}
 	}
 
-	if batch.Size() > 0 {
-		if err := db.ExecuteBatch(batch); err != nil {
-			return err
+	if err := db.Query("INSERT INTO tim2.docs2(col,acc,doc,terms,part,day) VALUES(?,?,?,?,?,?)", col, accid, doc, terms, part, day).Exec(); err != nil {
+		return err
+	}
+
+	// write new terms to docs
+	for i, term := range news {
+		batch.Query("INSERT INTO tim2.terms(col,acc,term,day,doc,part) VALUES(?,?,?,?,?,?)", col, accid, term, day, doc, part)
+		if batch.Size()%50 == 0 || (i == len(news)-1 && batch.Size() > 0) {
+			if err := db.ExecuteBatch(batch); err != nil {
+				return err
+			}
+			batch = db.NewBatch(gocql.LoggedBatch)
 		}
 	}
 	return nil
@@ -213,117 +307,4 @@ func waitforstartup() {
 		fmt.Println("cassandra", err, ". Retring after 5sec...")
 		time.Sleep(5 * time.Second)
 	}
-
-	version := 0
-	err = db.Query("SELECT version FROM tim2.config WHERE k=?", "tim2").Scan(&version)
-	if err != nil && err.Error() == gocql.ErrNotFound.Error() {
-		if err := db.Query("INSERT INTO tim2.config(k, version) VALUES(?,?)", "tim2", 1).Exec(); err != nil {
-			panic(err)
-		}
-	}
-
-	if err != nil && err.Error() != gocql.ErrNotFound.Error() {
-		panic(err)
-	}
-
-	err = db.Query("CREATE TABLE IF NOT EXISTS tim2.terms_" + strconv.Itoa(version) + " (col ASCII, acc ASCII, term TEXT, day BIGINT, doc ASCII, part ASCII, PRIMARY KEY((col, acc, term), day, doc, part)) WITH CLUSTERING ORDER BY (day DESC, doc DESC, part DESC)").Exec()
-	if err != nil {
-		panic(err)
-	}
-
-	err = db.Query("CREATE TABLE IF NOT EXISTS tim2.terms_" + strconv.Itoa(version+1) + " (col ASCII, acc ASCII, term TEXT, day BIGINT, doc ASCII, part ASCII, PRIMARY KEY((col, acc, term), day, doc, part)) WITH CLUSTERING ORDER BY (day DESC, doc DESC, part DESC)").Exec()
-	if err != nil {
-		panic(err)
-	}
-}
-
-// private for getVersion
-var (
-	_version           = 0
-	_last_version_read = int64(0)
-)
-
-func getVersion() int {
-	waitforstartup()
-	// cache 5 mins
-	if time.Now().Unix()-_last_version_read > 300 {
-		ver := 0
-		db.Query("SELECT version FROM tim2.config WHERE k=?", "tim2").Scan(&ver)
-		if ver > 0 {
-			_version = ver
-		}
-	}
-	return _version
-}
-
-// Refresh tries to copy terms to a more fresh version
-func Refresh() error {
-	waitforstartup()
-
-	version := 0
-	// quit if cannot read version
-	err := db.Query("SELECT version FROM tim2.config WHERE k=?", "tim2").Scan(&version)
-	if err != nil {
-		return err
-	}
-
-	version++
-	// create table if not exists
-	err = db.Query("CREATE TABLE IF NOT EXISTS tim2.terms_" + strconv.Itoa(version) + " (col ASCII, acc ASCII, term TEXT, day BIGINT, doc ASCII, part ASCII, PRIMARY KEY((col, acc, term), day, doc, part)) WITH CLUSTERING ORDER BY (day DESC, doc DESC, part DESC)").Exec()
-	if err != nil {
-		panic(err)
-	}
-
-	var acc, col, doc, part, term string
-	var day int64
-	start := time.Now()
-	count := 0
-	batch := db.NewBatch(gocql.LoggedBatch)
-	iter := db.Query("SELECT acc, col, doc, term, part, day FROM tim2.docs").Iter()
-	for iter.Scan(&acc, &col, &doc, &term, &part, &day) {
-		count++
-		if count%1000 == 0 {
-			fmt.Println(time.Since(start), "PROGRESS", count)
-		}
-
-		batch.Query("INSERT INTO tim2.terms_"+strconv.Itoa(version)+"(col,acc,term,day,doc,part) VALUES(?,?,?,?,?,?)", col, acc, term, day, doc, part)
-		if batch.Size()%50 == 0 {
-			// do not die or we have to run again from the scrach
-			for {
-				if err := db.ExecuteBatch(batch); err != nil {
-					fmt.Println("cannot execute batch", acc, col, doc, term, part, day, err)
-					time.Sleep(5 * time.Second)
-					continue
-				}
-				break
-			}
-			batch = db.NewBatch(gocql.LoggedBatch)
-		}
-	}
-
-	if batch.Size() > 0 {
-		if err := db.ExecuteBatch(batch); err != nil {
-			return err
-		}
-	}
-
-	if err := iter.Close(); err != nil {
-		return err
-	}
-
-	if err := db.Query("INSERT INTO tim2.config(k, version) VALUES(?,?)", "tim2", version).Exec(); err != nil {
-		return err
-	}
-
-	// drop old tables
-	// keep version - 1
-	err = db.Query("DROP TABLE IF EXISTS tim2.terms_" + strconv.Itoa(version-2)).Exec()
-	fmt.Println("DROP tim2.terms_"+strconv.Itoa(version-2), err)
-
-	err = db.Query("DROP TABLE IF EXISTS tim2.terms_" + strconv.Itoa(version-3)).Exec()
-	fmt.Println("DROP tim2.terms_"+strconv.Itoa(version-3), err)
-
-	db.Query("DROP TABLE IF EXISTS tim2.terms_" + strconv.Itoa(version-4)).Exec()
-	fmt.Println("DROP tim2.terms_"+strconv.Itoa(version-4), err)
-	return err
 }
