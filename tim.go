@@ -72,8 +72,8 @@ func SearchPartOnly(col, accid, query, anchor string, only_parts []string, limit
 }
 
 type Hit struct {
-	doc  string
-	part string
+	Doc  string
+	Part string
 }
 
 func doSearch(collection, accid, query, anchor string, only_parts []string, limit int, doc_distinct bool) ([]Hit, string, error) {
@@ -150,9 +150,9 @@ func doSearch(collection, accid, query, anchor string, only_parts []string, limi
 		alreadyhitdoc := false
 		alreadyhitdocpart := false
 		for _, hit := range hits {
-			if docid == hit.doc {
+			if docid == hit.Doc {
 				alreadyhitdoc = true
-				if hit.part == part {
+				if hit.Part == part {
 					alreadyhitdocpart = true
 				}
 			}
@@ -196,7 +196,7 @@ func doSearch(collection, accid, query, anchor string, only_parts []string, limi
 			continue
 		}
 
-		hits = append(hits, Hit{doc: docid, part: part})
+		hits = append(hits, Hit{Doc: docid, Part: part})
 		anchor = fmt.Sprintf("%d_%s_%s", day, docid, part)
 		if len(hits) >= limit {
 			break
@@ -208,9 +208,20 @@ func doSearch(collection, accid, query, anchor string, only_parts []string, limi
 	return hits, anchor, nil
 }
 
+func IndexName(col, accid, doc, part string, day int, name string) error {
+	combinations := shuffleName(name)
+	return Index(col, accid, doc, part, day, strings.Join(combinations, ";"))
+}
+
 // Index creates reverse index for document part
 // remove all old terms, write new terms
 func Index(col, accid, doc, part string, day int, text string) error {
+	if len(text) > 10000 {
+		text = text[0:9999]
+	}
+	if day <= 0 || day > int(time.Now().Unix()*10) {
+		day = int(time.Now().Unix() / 86400)
+	}
 	waitforstartup()
 	terms := Tokenize(text)
 

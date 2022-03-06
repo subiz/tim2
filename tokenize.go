@@ -3,7 +3,7 @@ package tim2
 import (
 	"regexp"
 	"strings"
-	"unicode/utf8"
+	// "unicode/utf8"
 
 	"github.com/thanhpk/ascii"
 )
@@ -11,9 +11,65 @@ import (
 const Token_min_len = 2
 const Token_max_len = 45
 
-var replacer = strings.NewReplacer("/", " ", "\"", " ", "/", " ", "_", " ", "'", " ", "{", " ", "}", " ",
-	"(", " ", ")", " ", "[", " ", "]", " ", "&", " ", "?", " ", "!", " ", "=", " ", ">", " ", "<", " ", "~", " ", ":", " ",
-	". ", " ", ", ", " ", "; ", " ", " - ", " ")
+// ; => split line, no bi-word
+// \space => split word, could combine into bi-word
+var replacer = strings.NewReplacer(
+	"/", " ",
+	"\"", " ",
+	"/", " ",
+	"_", " ",
+	"'", " ",
+	"{", " ",
+	"}", " ",
+	"(", " ",
+	")", " ",
+	"[", " ",
+	"]", " ",
+	"&", " ",
+	"?", " ",
+	"!", " ",
+	"=", " ",
+	">", " ; ",
+	"\" ", " ; ",
+	"<", " ; ",
+	" \"", " ; ",
+	"~", " ",
+	":", " ",
+	// do not split, since use can break line during a paragraph and we should not break the word
+	// eg: | cong hoa xa hoi chu nghia viet
+	//     | nam doc lap tu du anh phuc
+	//    => viet-nam stills count
+	// "\n", " ; ",
+	".\n", " ; ",
+	". ", " ; ",
+	",\n", " ; ",
+	", ", " ; ",
+	"; ", " ; ",
+	" - ", "\n")
+
+func shuffleName(name string) []string {
+	str := ascii.Convert(name)
+	// remove space and weird characters
+	str = strings.Join(strings.Fields(str), " ")
+	str = strings.Replace(str, "  ", " ", -1)
+	str = strings.TrimSpace(strings.ToLower(str))
+	// generate name combination for better match
+	// Pham Kieu Thanh
+	// Pham Thanh Kieu
+	// Kieu Pham
+	arr := strings.Split(str, " ")
+	combinations := []string{}
+	for i := 0; i < len(arr); i++ {
+		if i < len(arr)-1 {
+			combinations = append(combinations, arr[i]+" "+arr[i+1])
+
+		}
+		if i > 0 {
+			combinations = append(combinations, arr[i]+" "+arr[i-1])
+		}
+	}
+	return combinations
+}
 
 func splitSentence(r rune) bool {
 	if r == '_' {
@@ -55,9 +111,7 @@ func Tokenize(str string) []string {
 	str = ascii.Convert(str)
 
 	// remove space and weird characters
-	str = strings.Replace(str, "\n", " ", -1)
 	str = replacer.Replace(" " + str + " ")
-
 	str = strings.Join(strings.Fields(str), " ")
 	tokens = tokenizeFilename(str)
 	for _, t := range tokens {
@@ -67,24 +121,15 @@ func Tokenize(str string) []string {
 		tokenM[t] = true
 	}
 
-	strs := strings.FieldsFunc(str, splitSentence)
-
+	liness := strings.Split(str, ";")
 	lines := [][]string{}
-	line := []string{}
-	for _, str := range strs {
-		if len(str) == 0 {
-			continue
-		}
-		line = append(line, str)
-		if len(str) < 2 || utf8.RuneCountInString(str) < 2 {
+	for _, str := range liness {
+		line := strings.FieldsFunc(str, splitSentence)
+		if len(line) > 0 {
 			lines = append(lines, line)
-			line = []string{}
-			continue
 		}
 	}
-	if len(line) > 0 {
-		lines = append(lines, line)
-	}
+
 	for _, line := range lines {
 		for i, word := range line {
 			if len(word) > Token_max_len {
