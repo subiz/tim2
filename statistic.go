@@ -1,8 +1,8 @@
 package tim2
 
 import (
-	"fmt"
 	"encoding/csv"
+	"fmt"
 	"io"
 	"os"
 	"strconv"
@@ -39,15 +39,38 @@ func Report() {
 		data[col+"_"+acc][term]++
 	}
 
+	// 10 50  100  200 500 1000
+	// accid: size => count
+	size := map[string]map[int]int{}
+
 	// trim
 	trimmedData := map[string]map[string]int{}
 	for k, v := range data {
 		for term, count := range v {
+
+			if size[k] == nil {
+				size[k] = make(map[int]int)
+			}
+
+			if count <= 10 {
+				size[k][10]++
+			} else if count <= 50 {
+				size[k][50]++
+			} else if count <= 100 {
+				size[k][100]++
+			} else if count <= 200 {
+				size[k][200]++
+			} else if count <= 500 {
+				size[k][500]++
+			} else if count <= 1000 {
+				size[k][1000]++
+			}
+
 			if trimmedData[k] == nil {
 				trimmedData[k] = make(map[string]int)
 			}
-			if count < 2000 {
-				continue
+			 if count < 2000 {
+				 // continue
 			}
 			trimmedData[k][term] = count
 		}
@@ -69,6 +92,10 @@ func Report() {
 		fmt.Println("DISTRIBUTION OF", k)
 		top10 := topK(v, 10)
 		fmt.Println(drawGraph(top10))
+		for segment, count := range size[k] {
+			fmt.Println("SIZE TERM <=", segment, ":", count)
+		}
+
 	}
 }
 
